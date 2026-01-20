@@ -1,0 +1,15 @@
+# plan:
+1. Create CARO game env ( Use GymENV and extended it )
+2. apply PPO to solve CARO
+3. apply deep cfr to solve CARO 
+4. apply dream to solve CARO ?
+5. apply alpha zero to solve CARO ? Probably no
+6. Use open siel -> extend caro -> use their algorithims to solve caro
+7. Compare a few method and let them face each other
+8. Online testing
+9. Big 2 game implementation in open siel
+10. use PPO to solve this
+11. use deep cfr to solve this
+12. use dream to solve this
+13. use deep cfr + onlive solver to compare
+14. a few alternative cfr algorithims to solve this
