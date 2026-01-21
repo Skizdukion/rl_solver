@@ -1,14 +1,16 @@
 # plan:
-1. Create CARO game env ( Use GymENV and extended it )  16 x 16
-2. apply PPO to solve CARO
-3. apply deep cfr/deep mccfr to solve CARO
-4. apply dream to solve CARO ?
-5. Use open siel -> extend caro -> use their algorithims to solve caro
-6. Compare a few method and let them face each other
-7. Online testing
-8. Big 2 game implementation in open siel
-9. use PPO to solve this
-10. use deep cfr / deep mccfr to solve this
-11. use dream to solve this
-12. use deep cfr + onlive solver to compare
-13. a few alternative cfr algorithims to solve this
+* Create GridWorldEnv and solve it with PPO - Done
+* Gym Env paralel with early terminated on big world
+* Create CARO game env ( Use GymENV and extended it )  16 x 16
+* apply PPO to solve CARO
+* apply deep cfr/deep mccfr to solve CARO
+* apply dream to solve CARO ?
+* Use open siel -> extend caro -> use their algorithims to solve caro
+* Compare a few method and let them face each other
+* Online testing
+* Big 2 game implementation in open siel
+* use PPO to solve this
+* use deep cfr / deep mccfr to solve this
+* use dream to solve this
+* use deep cfr + onlive solver to compare
+* a few alternative cfr algorithims to solve this

@@ -15,7 +15,7 @@ class Actions(Enum):
 class GridWorldEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    def __init__(self, render_mode=None, size=5):
+    def __init__(self, render_mode=None, size=16):
         self.size = size  # The size of the square grid
         self.window_size = 512  # The size of the PyGame window
 
