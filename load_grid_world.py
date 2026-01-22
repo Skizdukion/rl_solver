@@ -59,8 +59,6 @@ def run_simluation(env, agent):
             # 4. Step
             observation, _, terminated, truncated, _ = env.step(action)
 
-    return
-
 
 env = gym.make("caro_env/GridWorld-v0", render_mode="rgb_array")
 env = RecordVideo(env, video_folder="recordings",

@@ -3,7 +3,8 @@
 * Gym Env paralel with early terminated on big world
 * View the training results
 * Create CARO game env ( Use GymENV and extended it )  16 x 16
-* apply PPO to solve CARO
+* apply PPO to solve CARO with basic opponent
+* self play PPO
 * apply deep cfr/deep mccfr to solve CARO
 * apply dream to solve CARO ?
 * Use open siel -> extend caro -> use their algorithims to solve caro
