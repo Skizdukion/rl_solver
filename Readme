@@ -1,6 +1,7 @@
 # plan:
 * Create GridWorldEnv and solve it with PPO - Done
 * Gym Env paralel with early terminated on big world
+* View the training results
 * Create CARO game env ( Use GymENV and extended it )  16 x 16
 * apply PPO to solve CARO
 * apply deep cfr/deep mccfr to solve CARO
