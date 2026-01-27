@@ -6,8 +6,8 @@ import numpy as np
 
 
 class Player(Enum):
-    X = 1
-    O = -1
+    Agent = 1
+    Opp = -1
 
 
 class GomokuEnv(gym.Env):
@@ -49,7 +49,7 @@ class GomokuEnv(gym.Env):
 
     def _get_obs(self):
         if self._last_player is None:
-            cur_player = Player.X.value
+            cur_player = Player.Agent.value
         else:
             cur_player = self._last_player * -1
 
@@ -72,6 +72,15 @@ class GomokuEnv(gym.Env):
         self._last_player = None
         self.board = np.zeros_like(self.board)
 
+        opp_starts = False
+        if options is not None and isinstance(options, dict):
+            opp_starts = options.get("opp_starts", False)
+
+        if opp_starts:
+            self._last_player = Player.Agent.value
+        else:
+            self._last_player = Player.Opp.value
+
         info = self._get_info()
 
         if self.render_mode == "human":
@@ -85,10 +94,7 @@ class GomokuEnv(gym.Env):
         x = action // self.size
         y = action % self.size
 
-        if self._last_player is None:
-            cur_player = Player.X.value
-        else:
-            cur_player = self._last_player * -1
+        cur_player = self._last_player * -1
 
         if self.board[x][y] != 0:
             raise Exception("Invalid move")

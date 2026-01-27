@@ -9,28 +9,60 @@ import torch.optim as optim
 import torch
 from tqdm import trange
 import os
-
-from network.grid_world.backbone import ActorCritic, BackboneNetwork
-from utils.ppo import calculate_advantages, calculate_loss, calculate_returns_with_bootstrapping, calculate_surrogate_loss, calculate_total_rewards_with_discount_factor, save_checkpoint
+from caro_env.wrappers.random_opp_wrapper import RandomOpponentWrapper
+from network.caro.backbone import ActorCritic, BackboneNetwork
+from utils.gomuko import from_boards_to_state
+from utils.ppo import (
+    calculate_advantages,
+    calculate_loss,
+    calculate_returns_with_bootstrapping,
+    calculate_surrogate_loss,
+    calculate_total_rewards_with_discount_factor,
+    save_checkpoint,
+)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def create_agent(hidden_dims, dropout, env: gym.vector.VectorEnv):
-    input_features = (
-        env.single_observation_space["agent"].shape[0]
-        + env.single_observation_space["target"].shape[0]
-    )  # only position of agent and target is needed
-
+def create_agent(env: gym.vector.VectorEnv):
     actor_output = env.single_action_space.n
-    critic_output = 1
-    actor = BackboneNetwork(input_features, hidden_dims, actor_output, dropout)
+    actor = BackboneNetwork(
+        in_channels=3,
+        hidden_channels=64,
+        out_features=actor_output,
+        dropout_prob=0.1,
+        board_size=env.single_observation_space["board"].shape[0],
+    )
     critic = BackboneNetwork(
-        input_features, hidden_dims, critic_output, dropout)
+        in_channels=3,
+        hidden_channels=64,
+        out_features=1,
+        dropout_prob=0.1,
+        board_size=env.single_observation_space["board"].shape[0],
+    )
 
     agent = ActorCritic(actor, critic)
 
     return agent
+
+
+def get_vectorized_actions(masks):
+    # masks shape: (num_envs, 225)
+
+    # 1. Generate random noise for every possible move in all envs
+    # We use a large enough range to ensure variety
+    random_noise = np.random.rand(*masks.shape)
+
+    # 2. "Zero out" the invalid moves.
+    # Any move where mask == 0 becomes 0 in masked_noise.
+    masked_noise = random_noise * masks
+
+    # 3. Find the index of the maximum random value for each env.
+    # Because invalid moves are 0, they won't be picked
+    # (unless a board is completely full, which shouldn't happen here).
+    actions = np.argmax(masked_noise, axis=1)
+
+    return actions
 
 
 def forward_pass(envs, agent, num_rollout_steps, discount_factor):
@@ -41,41 +73,43 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor):
     rewards = []
     dones = []
 
-    observations, _ = envs.reset()
-    state = np.concatenate(
-        [observations["agent"], observations["target"]], axis=-1)  # Shape (4, )
+    observation, info = envs.reset()
+    state = from_boards_to_state(observation["board"])
     agent.train()
 
-    for _ in range(num_rollout_steps):
-        state = torch.tensor(state, dtype=torch.float32, device=device)
-        states.append(state)
+    for i in range(num_rollout_steps):
+        # AGENT turn
+        state = torch.tensor(
+            state, dtype=torch.float32, device=device
+        )  # Batch, 3, board_size, board_size
 
+        states.append(state)
         action_pred, value_pred = agent(state)
-        dist = distributions.Categorical(logits=action_pred)
+
+        # 2. Mask the logits
+        mask = torch.tensor(info["action_mask"], device=device)
+        masked_action_pred = action_pred + (1 - mask) * -1e9
+
+        dist = distributions.Categorical(logits=masked_action_pred)
         action = dist.sample()
         log_prob_action = dist.log_prob(action)
 
-        observations, reward, terminated, truncated, _ = envs.step(
-            action.cpu().numpy())
+        observation, reward, agent_turn_terminated, agent_turn_truncated, info = (
+            envs.step(action.cpu().numpy())
+        )
 
-        done_mask = terminated | truncated
-
-        state = np.concatenate(
-            [observations["agent"], observations["target"]], axis=-1)
+        done_mask = agent_turn_terminated | agent_turn_truncated
 
         actions.append(action)
         actions_log_probability.append(log_prob_action)
-
         values.append(value_pred.squeeze(-1))
-        rewards.append(torch.tensor(
-            reward, dtype=torch.float32, device=device))
-        dones.append(torch.tensor(
-            done_mask, dtype=torch.float32, device=device))
+        dones.append(torch.tensor(done_mask, dtype=torch.float32, device=device))
+        state = from_boards_to_state(observation["board"])
+        rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
 
     with torch.no_grad():
         # Get the value of the 'next_state' to estimate future rewards
-        last_state_tensor = torch.tensor(
-            state, dtype=torch.float32, device=device)
+        last_state_tensor = torch.tensor(state, dtype=torch.float32, device=device)
         _, last_value = agent(last_state_tensor)
         last_value = last_value.squeeze(-1)  # (num_envs,)
 
@@ -87,7 +121,8 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor):
     dones_tensor = torch.stack(dones)
 
     returns = calculate_returns_with_bootstrapping(
-        rewards_tensor, dones_tensor, last_value, discount_factor)
+        rewards_tensor, dones_tensor, last_value, discount_factor
+    )
     advantages = calculate_advantages(returns, values).to(device)
 
     return states, actions, actions_log_probability, advantages, returns, rewards_tensor
@@ -105,8 +140,9 @@ def update_policy(
     epsilon,
     entropy_coefficient,
 ):
-
-    states = states.view(-1, states.size(-1))
+    states = states.flatten(
+        0, 1
+    )  # From [Rollout, Env, 3, 16, 16] -> [Rollout * Env, 3, 16, 16]
     actions = actions.view(-1)
     actions_log_probability_old = actions_log_probability_old.view(-1).detach()
     advantages = advantages.view(-1)
@@ -139,8 +175,7 @@ def update_policy(
             )  # efficient learning
             entropy = probability_distribution_new.entropy()
 
-            actions_log_probability_new = probability_distribution_new.log_prob(
-                actions)
+            actions_log_probability_new = probability_distribution_new.log_prob(actions)
 
             surrogate_loss = calculate_surrogate_loss(
                 actions_log_probability_old,
@@ -166,58 +201,38 @@ def update_policy(
     return total_policy_loss / ppo_steps, total_value_loss / ppo_steps
 
 
-def evaluate(single_env, agent, discount_factor, early_stop=500):
-    agent.eval()
-    terminated = False
-    rewards = []
+def make_env():
+    env = gym.make("caro_env/Gomoku-v0")
+    env = RandomOpponentWrapper(env)
+    env = gym.wrappers.Autoreset(env)
 
-    observation, _ = single_env.reset()
-    state = np.concatenate(
-        [observation["agent"], observation["target"]], axis=-1)
-    timestep = 0
-    while not terminated and timestep < early_stop:
-        state = torch.tensor(state, dtype=torch.float32,
-                             device=device).unsqueeze(0)
-        with torch.no_grad():
-            action_pred, _ = agent(state)
-            action_prob = f.softmax(action_pred, dim=-1)
-        action = torch.argmax(action_prob, dim=-1)
-        observation, reward, terminated, _, _ = single_env.step(action.item())
-        state = np.concatenate([observation["agent"], observation["target"]])
-        rewards.append(reward)
-        timestep += 1
-
-    return calculate_total_rewards_with_discount_factor(rewards, discount_factor)
+    return env
 
 
 def run_ppo():
     MAX_EPISODES = 500
-    DISCOUNT_FACTOR = 0.99
-    REWARD_THRESHOLD = 475
+    DISCOUNT_FACTOR = 1
     PRINT_INTERVAL = 10
     PPO_STEPS = 8
     N_TRIALS = 100
     EPSILON = 0.2
     ENTROPY_COEFFICIENT = 0.01
-    HIDDEN_DIMENSIONS = 64
-    DROPOUT = 0.2
     LEARNING_RATE = 1e-4
-    MAX_TIME_STEPS = 500
     SAVE_INTERVAL = 50
 
     train_rewards = []
-    test_rewards = []
+    # test_rewards = []
     policy_losses = []
     value_losses = []
 
-    envs = gym.make_vec("caro_env/GridWorld-v0", num_envs=4,
-                        vectorization_mode="async")
+    envs = gym.vector.SyncVectorEnv([make_env for _ in range(4)])
+    single_env = RandomOpponentWrapper(gym.make("caro_env/Gomoku-v0"))
 
-    single_env = gym.make("caro_env/GridWorld-v0")
-
-    agent = create_agent(HIDDEN_DIMENSIONS, DROPOUT, envs)
+    agent = create_agent(envs)
     agent.to(device)
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
+
+    MAX_TIME_STEPS = 512
 
     for episode in trange(1, MAX_EPISODES + 1):
         states, actions, actions_log_probability, advantages, returns, rewards = (
@@ -237,16 +252,15 @@ def run_ppo():
             ENTROPY_COEFFICIENT,
         )
 
-        test_reward = evaluate(single_env, agent, DISCOUNT_FACTOR)
+        # test_reward = evaluate(single_env, agent, DISCOUNT_FACTOR)
         policy_losses.append(policy_loss)
         value_losses.append(value_loss)
         train_rewards.append(
-            calculate_total_rewards_with_discount_factor(
-                rewards, DISCOUNT_FACTOR)
+            calculate_total_rewards_with_discount_factor(rewards, DISCOUNT_FACTOR).cpu()
         )
-        test_rewards.append(test_reward)
+        # test_rewards.append(test_reward)
         mean_train_rewards = np.mean(train_rewards[-N_TRIALS:])
-        mean_test_rewards = np.mean(test_rewards[-N_TRIALS:])
+        # mean_test_rewards = np.mean(test_rewards[-N_TRIALS:])
         mean_abs_policy_loss = np.mean(np.abs(policy_losses[-N_TRIALS:]))
         mean_abs_value_loss = np.mean(np.abs(value_losses[-N_TRIALS:]))
 
@@ -254,17 +268,14 @@ def run_ppo():
             print(
                 f"Episode: {episode:3} | \
                   Mean Train Rewards: {mean_train_rewards:3.1f} \
-                  | Mean Test Rewards: {mean_test_rewards:3.1f} \
                   | Mean Abs Policy Loss: {mean_abs_policy_loss:2.2f} \
                   | Mean Abs Value Loss: {mean_abs_value_loss:2.2f}"
             )
 
         if episode % SAVE_INTERVAL == 0:
-            save_checkpoint(episode, agent, optimizer, train_rewards)
-
-        if mean_test_rewards >= REWARD_THRESHOLD:
-            print(f"Reached reward threshold in {episode} episodes")
-            break
+            save_checkpoint(
+                episode, agent, optimizer, train_rewards, "checkpoints_gomuko_basic_opp"
+            )
 
 
 run_ppo()
