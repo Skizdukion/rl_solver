@@ -83,12 +83,26 @@ def save_checkpoint(episode, agent, optimizer, train_rewards, path):
     torch.save(checkpoint, f"{path}/ppo_latest.pt")
 
 
-def load_checkpoint(agent, path):
+def load_agent_weights(agent, path):
     if os.path.exists(path):
         checkpoint = torch.load(path)
         agent.load_state_dict(checkpoint["model_state_dict"])
         # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_episode = checkpoint["episode"]
         print(f"Resuming from episode {start_episode}")
-        return start_episode
-    return 0
+        return True
+    return False
+
+
+def load_optimizer_state(optimizer, path, device):
+    """
+    Separate function to resume optimizer momentum and parameters.
+    """
+    if os.path.exists(path):
+        checkpoint = torch.load(path, map_location=device)
+        if "optimizer_state_dict" in checkpoint:
+            optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            print(f"Optimizer state loaded from {path}")
+            return True
+    print("Warning: No optimizer state found in checkpoint.")
+    return False

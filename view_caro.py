@@ -4,9 +4,10 @@ from gymnasium.wrappers import RecordVideo
 import torch
 import caro_env
 from caro_env.wrappers.random_opp_wrapper import RandomOpponentWrapper
+from caro_env.wrappers.self_play_opp_wrapper import SelfPlayOpponentWrapper
 from network.caro.backbone import ActorCritic, BackboneNetwork
 from utils.gomuko import from_boards_to_state
-from utils.ppo import load_checkpoint
+from utils.ppo import load_agent_weights
 
 
 def create_agent(env: gym.Env):
@@ -46,20 +47,27 @@ def run_simluation(env, agent):
             state_tensor = torch.tensor(state, dtype=torch.float32)
 
             action_pred, _ = agent(state_tensor)
-            
-            mask = torch.tensor(info["action_mask"])
-            masked_action_pred = action_pred + (1 - mask) * -1e9
-            action = torch.argmax(masked_action_pred, dim=-1).item()
+
+            # mask = torch.tensor(info["action_mask"])
+            # masked_action_pred = action_pred + (1 - mask) * -1e9
+            # action = torch.argmax(masked_action_pred, dim=-1).item()
+            action = torch.argmax(action_pred, dim=-1).item()
 
             observation, _, terminated, truncated, info = env.step(action)
 
 
 env = gym.make("caro_env/Gomoku-v0", render_mode="rgb_array")
-env = RandomOpponentWrapper(env)
+env = SelfPlayOpponentWrapper(env)
 env = RecordVideo(env, video_folder="recordings", episode_trigger=lambda x: x == 0)
 
 agent = create_agent(env)
-load_checkpoint(agent, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
+load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
+
+basic_op = create_agent(env)
+load_agent_weights(agent, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
+
+SelfPlayOpponentWrapper.DEVICE = "cpu"
+SelfPlayOpponentWrapper.add_opp(basic_op)
 
 run_simluation(env, agent)
 env.close()

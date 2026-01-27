@@ -5,7 +5,7 @@ import numpy as np
 from gymnasium.wrappers import RecordVideo
 from network.grid_world.backbone import ActorCritic, BackboneNetwork
 import caro_env
-from utils.ppo import load_checkpoint
+from utils.ppo import load_agent_weights
 
 
 def create_agent(env: gym.Env, hidden_dims=64, dropout=0.2):
@@ -52,7 +52,7 @@ env = gym.make("caro_env/GridWorld-v0", render_mode="rgb_array")
 env = RecordVideo(env, video_folder="recordings", episode_trigger=lambda x: x % 50 == 0)
 
 agent = create_agent(env)
-load_checkpoint(agent, "checkpoints_gridworld/ppo_lastest.pt")
+load_agent_weights(agent, "checkpoints_gridworld/ppo_lastest.pt")
 
 run_simluation(env, agent)
 env.close()

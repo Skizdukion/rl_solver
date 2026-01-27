@@ -60,7 +60,6 @@ class GomokuEnv(gym.Env):
 
     def _get_info(self):
         return {
-            "last_play": self._last_play,
             "action_mask": (self.board.ravel() == 0).astype(np.int8),
         }
 
