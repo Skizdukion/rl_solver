@@ -31,7 +31,8 @@ class SelfPlayOpponentWrapper(gym.Wrapper):
 
     def _get_opp_action(self, obs, info):
         # Convert single numpy obs to tensor [1, C, H, W]
-        board = np.expand_dims(obs["board"], axis=0)
+        # Invert board logic: My stones (-1) -> 1, Enemy stones (1) -> -1
+        board = np.expand_dims(obs["board"] * -1, axis=0)
         state = from_boards_to_state(board)
         state_tensor = torch.tensor(
             state, dtype=torch.float32, device=SelfPlayOpponentWrapper.DEVICE
@@ -75,7 +76,7 @@ class SelfPlayOpponentWrapper(gym.Wrapper):
             # # CRITICAL: If the opponent won on the first move,
             # if terminated or truncated:
             #     return self.reset(**kwargs)
-            
+
         return obs, info
 
     def step(self, action):
