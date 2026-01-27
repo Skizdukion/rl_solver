@@ -88,9 +88,4 @@ class SelfPlayOpponentWrapper(gym.Wrapper):
         opp_action = self._get_opp_action(obs, info)
         obs, opp_reward, terminated, truncated, info = self.env.step(opp_action)
 
-        if obs is None or reward is None or terminated is None or info is None:
-            print(
-                f"CRITICAL: Found None! Obs: {type(obs)}, Rew: {type(reward)}, Term: {type(terminated)}, Info: {type(info)}"
-            )
-
         return obs, float(-opp_reward), terminated, truncated, info

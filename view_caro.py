@@ -48,10 +48,10 @@ def run_simluation(env, agent):
 
             action_pred, _ = agent(state_tensor)
 
-            # mask = torch.tensor(info["action_mask"])
-            # masked_action_pred = action_pred + (1 - mask) * -1e9
-            # action = torch.argmax(masked_action_pred, dim=-1).item()
-            action = torch.argmax(action_pred, dim=-1).item()
+            mask = torch.tensor(info["action_mask"])
+            masked_action_pred = action_pred + (1 - mask) * -1e9
+            action = torch.argmax(masked_action_pred, dim=-1).item()
+            # action = torch.argmax(action_pred, dim=-1).item()
 
             observation, _, terminated, truncated, info = env.step(action)
 
@@ -64,7 +64,7 @@ agent = create_agent(env)
 load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
 
 basic_op = create_agent(env)
-load_agent_weights(agent, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
+load_agent_weights(basic_op, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
 
 SelfPlayOpponentWrapper.DEVICE = "cpu"
 SelfPlayOpponentWrapper.add_opp(basic_op)

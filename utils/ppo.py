@@ -90,8 +90,9 @@ def load_agent_weights(agent, path):
         # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_episode = checkpoint["episode"]
         print(f"Resuming from episode {start_episode}")
-        return True
-    return False
+        return start_episode
+    
+    return 1
 
 
 def load_optimizer_state(optimizer, path, device):

@@ -12,11 +12,10 @@ import os
 from caro_env.wrappers.random_opp_wrapper import RandomOpponentWrapper
 from caro_env.wrappers.self_play_opp_wrapper import SelfPlayOpponentWrapper
 from network.caro.backbone import ActorCritic, BackboneNetwork
-from utils.gomuko import from_boards_to_state
+from utils.gomuko import calculate_segmented_returns_time_major, from_boards_to_state
 from utils.ppo import (
     calculate_advantages,
     calculate_loss,
-    calculate_returns_with_bootstrapping,
     calculate_surrogate_loss,
     calculate_total_rewards_with_discount_factor,
     load_agent_weights,
@@ -121,11 +120,9 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
     actions_log_probability = torch.stack(actions_log_probability)
     values = torch.stack(values)
     rewards_tensor = torch.stack(rewards)
-    dones_tensor = torch.stack(dones)
+    # dones_tensor = torch.stack(dones)
 
-    returns = calculate_returns_with_bootstrapping(
-        rewards_tensor, dones_tensor, last_value, discount_factor
-    )
+    returns = calculate_segmented_returns_time_major(rewards_tensor, last_value)
     advantages = calculate_advantages(returns, values).to(device)
 
     return states, actions, actions_log_probability, advantages, returns, rewards_tensor
@@ -211,8 +208,32 @@ def make_env():
     return env
 
 
+def create_opp(envs):
+    SelfPlayOpponentWrapper.DEVICE = device
+
+    basic_op = create_agent(envs)
+    load_agent_weights(basic_op, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
+    SelfPlayOpponentWrapper.add_opp(basic_op)
+
+    # op_2 = create_agent(envs)
+    # load_agent_weights(op_2, "checkpoints_gomuko/ppo_checkpoint_100.pt")
+    # SelfPlayOpponentWrapper.add_opp(op_2)
+
+    # op_3 = create_agent(envs)
+    # load_agent_weights(op_3, "checkpoints_gomuko/ppo_checkpoint_150.pt")
+    # SelfPlayOpponentWrapper.add_opp(op_3)
+
+    # op_4 = create_agent(envs)
+    # load_agent_weights(op_4, "checkpoints_gomuko/ppo_checkpoint_200.pt")
+    # SelfPlayOpponentWrapper.add_opp(op_4)
+
+    # op_5 = create_agent(envs)
+    # load_agent_weights(op_5, "checkpoints_gomuko/ppo_checkpoint_250.pt")
+    # SelfPlayOpponentWrapper.add_opp(op_5)
+
+
 def run_ppo():
-    MAX_EPISODES = 500
+    MAX_EPISODES = 20000
     DISCOUNT_FACTOR = 1
     PRINT_INTERVAL = 10
     PPO_STEPS = 8
@@ -222,6 +243,7 @@ def run_ppo():
     LEARNING_RATE = 1e-4
     SAVE_INTERVAL = 50
     TEMPERATURE = 1.2
+    ADD_OPP_INTERVAL = 500
 
     train_rewards = []
     policy_losses = []
@@ -230,21 +252,17 @@ def run_ppo():
     envs = gym.vector.SyncVectorEnv([make_env for _ in range(4)])
 
     agent = create_agent(envs)
-    load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
+    start_episode = load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
     agent.to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
     load_optimizer_state(optimizer, "checkpoints_gomuko/ppo_latest.pt", device)
 
-    basic_op = create_agent(envs)
-    load_agent_weights(agent, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
-
-    SelfPlayOpponentWrapper.DEVICE = device
-    SelfPlayOpponentWrapper.add_opp(basic_op)
+    create_opp(envs)
 
     MAX_TIME_STEPS = 512
 
-    for episode in trange(1, MAX_EPISODES + 1):
+    for episode in trange(start_episode, MAX_EPISODES + 1):
         states, actions, actions_log_probability, advantages, returns, rewards = (
             forward_pass(envs, agent, MAX_TIME_STEPS, DISCOUNT_FACTOR, TEMPERATURE)
         )
@@ -284,6 +302,8 @@ def run_ppo():
             save_checkpoint(
                 episode, agent, optimizer, train_rewards, "checkpoints_gomuko"
             )
+
+        if episode % ADD_OPP_INTERVAL == 0:
             SelfPlayOpponentWrapper.add_opp(agent)
 
 
