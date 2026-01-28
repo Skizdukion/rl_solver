@@ -90,10 +90,12 @@ def save_checkpoint(episode, agent, optimizer, train_rewards, path):
 def load_agent_weights(agent, path):
     path = CHECKPOINT_PATH + path
 
+    print("Load agent weights")
+    print(path)
+
     if os.path.exists(path):
         checkpoint = torch.load(path)
         agent.load_state_dict(checkpoint["model_state_dict"])
-        # optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_episode = checkpoint["episode"]
         print(f"Resuming from episode {start_episode}")
         return start_episode
@@ -103,6 +105,9 @@ def load_agent_weights(agent, path):
 
 def load_optimizer_state(optimizer, path, device):
     path = CHECKPOINT_PATH + path
+
+    print("Load optimizer state")
+    print(path)
 
     """
     Separate function to resume optimizer momentum and parameters.
