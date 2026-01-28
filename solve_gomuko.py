@@ -9,10 +9,11 @@ import torch.optim as optim
 import torch
 from tqdm import trange
 import os
-from caro_env.wrappers.random_opp_wrapper import RandomOpponentWrapper
-from caro_env.wrappers.self_play_opp_wrapper import SelfPlayOpponentWrapper
+
+# from caro_env.wrappers.random_opp_wrapper import RandomOpponentWrapper
+# from caro_env.wrappers.self_play_opp_wrapper import SelfPlayOpponentWrapper
 from network.caro.backbone import ActorCritic, BackboneNetwork
-from utils.gomuko import calculate_segmented_returns_time_major, from_boards_to_state
+from utils.gomuko import calculate_adversarial_gae, from_boards_to_state
 from utils.ppo import (
     calculate_advantages,
     calculate_loss,
@@ -74,13 +75,14 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
     values = []
     rewards = []
     dones = []
+    terminations = []
+    truncations = []
 
     observation, info = envs.reset()
     state = from_boards_to_state(observation["board"])
     agent.train()
 
     for i in range(num_rollout_steps):
-        # AGENT turn
         state = torch.tensor(
             state, dtype=torch.float32, device=device
         )  # Batch, 3, board_size, board_size
@@ -96,18 +98,19 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
         action = dist.sample()
         log_prob_action = dist.log_prob(action)
 
-        observation, reward, agent_turn_terminated, agent_turn_truncated, info = (
-            envs.step(action.cpu().numpy())
+        observation, reward, terminated, truncated, info = envs.step(
+            action.cpu().numpy()
         )
-
-        done_mask = agent_turn_terminated | agent_turn_truncated
 
         actions.append(action)
         actions_log_probability.append(log_prob_action)
         values.append(value_pred.squeeze(-1))
-        dones.append(torch.tensor(done_mask, dtype=torch.float32, device=device))
-        state = from_boards_to_state(observation["board"])
         rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
+
+        terminations.append(torch.tensor(terminated, dtype=torch.bool, device=device))
+        truncations.append(torch.tensor(truncated, dtype=torch.bool, device=device))
+
+        state = from_boards_to_state(observation["board"])
 
     with torch.no_grad():
         # Get the value of the 'next_state' to estimate future rewards
@@ -118,12 +121,19 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
     states = torch.stack(states)
     actions = torch.stack(actions)
     actions_log_probability = torch.stack(actions_log_probability)
-    values = torch.stack(values)
+    values_tensor = torch.stack(values)
+    term_tensor = torch.stack(terminations)
+    trunc_tensor = torch.stack(truncations)
     rewards_tensor = torch.stack(rewards)
     # dones_tensor = torch.stack(dones)
 
-    returns = calculate_segmented_returns_time_major(rewards_tensor, last_value)
-    advantages = calculate_advantages(returns, values).to(device)
+    advantages, returns = calculate_adversarial_gae(
+        rewards_tensor,
+        values_tensor,
+        last_value,
+        term_tensor,  # Uses terminations to kill bootstrap
+        gamma=discount_factor,
+    )
 
     return states, actions, actions_log_probability, advantages, returns, rewards_tensor
 
@@ -145,8 +155,9 @@ def update_policy(
     )  # From [Rollout, Env, 3, 16, 16] -> [Rollout * Env, 3, 16, 16]
     actions = actions.view(-1)
     actions_log_probability_old = actions_log_probability_old.view(-1).detach()
-    advantages = advantages.view(-1)
-    returns = returns.view(-1)
+    advantages = advantages.view(-1).detach()
+    returns = returns.view(-1).detach()
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
 
     batch_size = 128
     total_policy_loss = 0
@@ -155,7 +166,7 @@ def update_policy(
         states, actions, actions_log_probability_old, advantages, returns
     )
     batch_dataset = DataLoader(
-        training_results_dataset, batch_size=batch_size, shuffle=False
+        training_results_dataset, batch_size=batch_size, shuffle=True
     )
 
     for _ in range(ppo_steps):
@@ -189,8 +200,8 @@ def update_policy(
             )
 
             optimizer.zero_grad()
-            policy_loss.backward()
-            value_loss.backward()
+            loss = policy_loss + value_loss
+            loss.backward()
 
             torch.nn.utils.clip_grad_norm_(agent.parameters(), max_norm=0.5)
             optimizer.step()
@@ -203,7 +214,7 @@ def update_policy(
 
 def make_env():
     env = gym.make("caro_env/Gomoku-v0")
-    env = SelfPlayOpponentWrapper(env)
+    # env = SelfPlayOpponentWrapper(env)
     env = gym.wrappers.Autoreset(env)
     return env
 
@@ -219,7 +230,7 @@ def run_ppo():
     LEARNING_RATE = 1e-4
     SAVE_INTERVAL = 50
     TEMPERATURE = 1.2
-    ADD_OPP_INTERVAL = 150
+    # ADD_OPP_INTERVAL = 150
 
     train_rewards = []
     policy_losses = []
@@ -233,10 +244,6 @@ def run_ppo():
 
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
     load_optimizer_state(optimizer, "checkpoints_gomuko/ppo_latest.pt", device)
-
-    SelfPlayOpponentWrapper.DEVICE = device
-
-    SelfPlayOpponentWrapper.add_opp(agent)
 
     MAX_TIME_STEPS = 512
 
@@ -280,9 +287,6 @@ def run_ppo():
             save_checkpoint(
                 episode, agent, optimizer, train_rewards, "checkpoints_gomuko"
             )
-
-        if episode % ADD_OPP_INTERVAL == 0:
-            SelfPlayOpponentWrapper.add_opp(agent)
 
 
 run_ppo()

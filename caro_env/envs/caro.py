@@ -48,13 +48,10 @@ class GomokuEnv(gym.Env):
         self.board = np.zeros((size, size), dtype=np.int8)
 
     def _get_obs(self):
-        if self._last_player is None:
-            cur_player = Player.Agent.value
-        else:
-            cur_player = self._last_player * -1
+        cur_player = self._last_player * -1
 
         return {
-            "board": self.board.copy(),
+            "board": self.board.copy() * cur_player,
             "current_player": cur_player,
         }
 

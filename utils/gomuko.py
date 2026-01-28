@@ -70,3 +70,54 @@ def calculate_segmented_returns_time_major(rewards, last_value):
     returns = torch.flip(filled_rev, dims=[0])[:-1, :]
 
     return returns
+
+
+def calculate_adversarial_gae(
+    rewards, values, last_value, terminations, gamma=0.99, lambd=0.95
+):
+    """
+    Args:
+        rewards: [T, B] - 1.0 for win, -1.0 for loss, 0.0 otherwise.
+        values: [T, B] - Critic's value predictions (Current Player's perspective).
+        last_value: [B] - Critic's value for the state after the rollout.
+        terminations: [T, B] - Boolean mask (True if game ended).
+        gamma: Discount factor (usually 0.99 for Gomoku).
+        lambd: GAE smoothing factor (usually 0.95).
+    """
+    T, B = rewards.shape
+    advantages = torch.zeros_like(rewards)
+
+    # We use GAE to accumulate the 'advantage' moving backwards through time
+    last_gae_lam = 0
+
+    # Step through time backwards
+    for t in reversed(range(T)):
+        # 1. Identify the 'next' value
+        if t == T - 1:
+            next_value = last_value
+            # If the rollout ended exactly when the game ended, next_value is 0
+            # (Standard RL logic: no future value after termination)
+            next_non_terminal = 1.0 - terminations[t].float()
+        else:
+            next_value = values[t + 1]
+            next_non_terminal = 1.0 - terminations[t].float()
+
+        # 2. ADVERSARIAL TD-ERROR (Delta)
+        # delta = reward + (gamma * -next_value * next_non_terminal) - values[t]
+        # We negate next_value because it's the opponent's win probability!
+        delta = rewards[t] + (gamma * -next_value * next_non_terminal) - values[t]
+
+        # 3. ACCUMULATE GAE
+        # We negate the previous GAE (last_gae_lam) because turns alternate.
+        # If I am in a good spot now, the previous state was bad for my opponent.
+        gae = delta + (gamma * lambd * next_non_terminal * -last_gae_lam)
+
+        advantages[t] = gae
+        last_gae_lam = gae
+
+    # 4. CALCULATE RETURNS
+    # Return = Advantage + Value
+    # This provides the 'ground truth' target for your Critic training.
+    returns = advantages + values
+
+    return advantages, returns
