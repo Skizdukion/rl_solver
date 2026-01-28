@@ -10,6 +10,7 @@ import torch
 from tqdm import trange
 import os
 from caro_env.wrappers.random_opp_wrapper import RandomOpponentWrapper
+from caro_env.wrappers.random_start_wrapper import RandomStartWrapper
 from caro_env.wrappers.self_play_opp_wrapper import SelfPlayOpponentWrapper
 from network.caro.backbone import ActorCritic, BackboneNetwork
 from utils.gomuko import calculate_segmented_returns_time_major, from_boards_to_state
@@ -48,26 +49,9 @@ def create_agent(env: gym.vector.VectorEnv):
     return agent
 
 
-def get_vectorized_actions(masks):
-    # masks shape: (num_envs, 225)
-
-    # 1. Generate random noise for every possible move in all envs
-    # We use a large enough range to ensure variety
-    random_noise = np.random.rand(*masks.shape)
-
-    # 2. "Zero out" the invalid moves.
-    # Any move where mask == 0 becomes 0 in masked_noise.
-    masked_noise = random_noise * masks
-
-    # 3. Find the index of the maximum random value for each env.
-    # Because invalid moves are 0, they won't be picked
-    # (unless a board is completely full, which shouldn't happen here).
-    actions = np.argmax(masked_noise, axis=1)
-
-    return actions
-
-
-def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
+def forward_pass(
+    envs, agent, num_rollout_steps, current_opp_model, temperature, num_envs
+):
     states = []
     actions = []
     actions_log_probability = []
@@ -96,16 +80,36 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
         action = dist.sample()
         log_prob_action = dist.log_prob(action)
 
-        observation, reward, agent_turn_terminated, agent_turn_truncated, info = (
-            envs.step(action.cpu().numpy())
+        observation, reward, terminations, truncations, info = envs.step(
+            action.cpu().numpy()
         )
 
-        done_mask = agent_turn_terminated | agent_turn_truncated
+        active_envs = ~(terminations | truncations)
+
+        opp_state = (
+            from_boards_to_state(observation["board"]) * -1
+        )
+
+        with torch.no_grad():
+            opp_logits = current_opp_model.actor(opp_state)
+
+            opp_mask = torch.tensor(info["action_mask"][active_envs])
+            masked_opp_logits = opp_logits + (1 - opp_mask) * -1e9
+            opp_actions = torch.argmax(masked_opp_logits, dim=-1)
+
+        full_opp_actions = np.zeros(num_envs, dtype=int)
+        full_opp_actions[active_envs] = opp_actions.cpu().numpy()
+
+        obs, opp_rewards, terminations, truncations, infos = envs.step(full_opp_actions)
+
+        state = from_boards_to_state(obs["board"])
+
+        rewards = rewards - opp_rewards
 
         actions.append(action)
         actions_log_probability.append(log_prob_action)
         values.append(value_pred.squeeze(-1))
-        dones.append(torch.tensor(done_mask, dtype=torch.float32, device=device))
+        # dones.append(torch.tensor(done_mask, dtype=torch.float32, device=device))
         state = from_boards_to_state(observation["board"])
         rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
 
@@ -159,7 +163,7 @@ def update_policy(
     )
 
     for _ in range(ppo_steps):
-        for batch_idx, (
+        for _, (
             states,
             actions,
             actions_log_probability_old,
@@ -203,9 +207,23 @@ def update_policy(
 
 def make_env():
     env = gym.make("caro_env/Gomoku-v0")
-    env = SelfPlayOpponentWrapper(env)
+    env = RandomStartWrapper(env)
     env = gym.wrappers.Autoreset(env)
     return env
+
+
+def select_random_op():
+    if len(SelfPlayOpponentWrapper.OPPS) == 0:
+        raise Exception("No opps add yet")
+
+    if np.random.random() < 0.5:
+        op = SelfPlayOpponentWrapper.OPPS[len(SelfPlayOpponentWrapper.OPPS) - 1]
+    else:
+        op = np.random.choice(SelfPlayOpponentWrapper.OPPS)
+
+    RandomStartWrapper.CURRENT_OP = op
+
+    return op
 
 
 def run_ppo():
@@ -225,9 +243,13 @@ def run_ppo():
     policy_losses = []
     value_losses = []
 
-    envs = gym.vector.SyncVectorEnv([make_env for _ in range(4)])
+    num_envs = 4
+
+    envs = gym.vector.SyncVectorEnv([make_env for _ in range(num_envs)])
 
     agent = create_agent(envs)
+    SelfPlayOpponentWrapper.add_opp(agent)  # Random action opponent always as base line
+
     start_episode = load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
     agent.to(device)
 
@@ -236,13 +258,15 @@ def run_ppo():
 
     SelfPlayOpponentWrapper.DEVICE = device
 
-    SelfPlayOpponentWrapper.add_opp(agent)
-
     MAX_TIME_STEPS = 512
 
     for episode in trange(start_episode, MAX_EPISODES + 1):
+        current_opp_model = select_random_op()
+
         states, actions, actions_log_probability, advantages, returns, rewards = (
-            forward_pass(envs, agent, MAX_TIME_STEPS, DISCOUNT_FACTOR, TEMPERATURE)
+            forward_pass(
+                envs, agent, MAX_TIME_STEPS, current_opp_model, TEMPERATURE, num_envs
+            )
         )
 
         policy_loss, value_loss = update_policy(

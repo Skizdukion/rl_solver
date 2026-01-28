@@ -6,8 +6,8 @@
 * apply PPO to solve CARO with basic opponent
 * self play PPO with exploration parameter
 * train in google collab
-* apply deep cfr/deep mccfr to solve CARO
-* apply dream to solve CARO ?
+* apply deep cfr/deep mccfr to solve CARO -> No
+* apply dream to solve CARO -> No
 * Use open siel -> extend caro -> use their algorithims to solve caro
 * Compare a few method and let them face each other
 * Online testing

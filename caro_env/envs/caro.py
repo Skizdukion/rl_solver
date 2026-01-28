@@ -24,7 +24,7 @@ class GomokuEnv(gym.Env):
             }
         )
 
-        self.action_space = spaces.Discrete(size * size)
+        self.action_space = spaces.Discrete(size * size) + 1 # 1 more for none action (opp action but settle so it is none)
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
