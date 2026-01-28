@@ -16,6 +16,7 @@ from utils.ppo import (
     calculate_advantages,
     calculate_loss,
     calculate_returns_with_bootstrapping,
+    calculate_segmented_returns_time_major,
     calculate_surrogate_loss,
     calculate_total_rewards_with_discount_factor,
     save_checkpoint,
@@ -120,9 +121,7 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor):
     rewards_tensor = torch.stack(rewards)
     dones_tensor = torch.stack(dones)
 
-    returns = calculate_returns_with_bootstrapping(
-        rewards_tensor, dones_tensor, last_value, discount_factor
-    )
+    returns = calculate_segmented_returns_time_major(rewards_tensor, last_value)
     advantages = calculate_advantages(returns, values).to(device)
 
     return states, actions, actions_log_probability, advantages, returns, rewards_tensor
