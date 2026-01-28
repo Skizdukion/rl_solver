@@ -219,7 +219,7 @@ def run_ppo():
     LEARNING_RATE = 1e-4
     SAVE_INTERVAL = 50
     TEMPERATURE = 1.2
-    ADD_OPP_INTERVAL = 500
+    ADD_OPP_INTERVAL = 150
 
     train_rewards = []
     policy_losses = []
