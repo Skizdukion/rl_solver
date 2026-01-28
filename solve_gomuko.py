@@ -208,30 +208,6 @@ def make_env():
     return env
 
 
-def create_opp(envs):
-    SelfPlayOpponentWrapper.DEVICE = device
-
-    basic_op = create_agent(envs)
-    load_agent_weights(basic_op, "checkpoints_gomuko_basic_opp/ppo_latest.pt")
-    SelfPlayOpponentWrapper.add_opp(basic_op)
-
-    # op_2 = create_agent(envs)
-    # load_agent_weights(op_2, "checkpoints_gomuko/ppo_checkpoint_100.pt")
-    # SelfPlayOpponentWrapper.add_opp(op_2)
-
-    # op_3 = create_agent(envs)
-    # load_agent_weights(op_3, "checkpoints_gomuko/ppo_checkpoint_150.pt")
-    # SelfPlayOpponentWrapper.add_opp(op_3)
-
-    # op_4 = create_agent(envs)
-    # load_agent_weights(op_4, "checkpoints_gomuko/ppo_checkpoint_200.pt")
-    # SelfPlayOpponentWrapper.add_opp(op_4)
-
-    # op_5 = create_agent(envs)
-    # load_agent_weights(op_5, "checkpoints_gomuko/ppo_checkpoint_250.pt")
-    # SelfPlayOpponentWrapper.add_opp(op_5)
-
-
 def run_ppo():
     MAX_EPISODES = 20000
     DISCOUNT_FACTOR = 1
@@ -258,7 +234,9 @@ def run_ppo():
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
     load_optimizer_state(optimizer, "checkpoints_gomuko/ppo_latest.pt", device)
 
-    create_opp(envs)
+    SelfPlayOpponentWrapper.DEVICE = device
+
+    SelfPlayOpponentWrapper.add_opp(agent)
 
     MAX_TIME_STEPS = 512
 

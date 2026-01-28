@@ -5,6 +5,7 @@
 * Create CARO game env ( Use GymENV and extended it )  16 x 16
 * apply PPO to solve CARO with basic opponent
 * self play PPO with exploration parameter
+* train in google collab
 * apply deep cfr/deep mccfr to solve CARO
 * apply dream to solve CARO ?
 * Use open siel -> extend caro -> use their algorithims to solve caro

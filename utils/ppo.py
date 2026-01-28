@@ -10,6 +10,8 @@ import torch
 from tqdm import trange
 import os
 
+CHECKPOINT_PATH = "/content/drive/MyDrive/RL_Project/"
+
 
 def calculate_returns_with_bootstrapping(rewards, dones, last_value, discount_factor):
     returns = torch.zeros_like(rewards)
@@ -69,6 +71,8 @@ def calculate_total_rewards_with_discount_factor(rewards, discount_factor):
 
 
 def save_checkpoint(episode, agent, optimizer, train_rewards, path):
+    path = CHECKPOINT_PATH + path
+
     if not os.path.exists(path):
         os.makedirs(path)
 
@@ -84,6 +88,8 @@ def save_checkpoint(episode, agent, optimizer, train_rewards, path):
 
 
 def load_agent_weights(agent, path):
+    path = CHECKPOINT_PATH + path
+
     if os.path.exists(path):
         checkpoint = torch.load(path)
         agent.load_state_dict(checkpoint["model_state_dict"])
@@ -91,11 +97,13 @@ def load_agent_weights(agent, path):
         start_episode = checkpoint["episode"]
         print(f"Resuming from episode {start_episode}")
         return start_episode
-    
+
     return 1
 
 
 def load_optimizer_state(optimizer, path, device):
+    path = CHECKPOINT_PATH + path
+
     """
     Separate function to resume optimizer momentum and parameters.
     """
