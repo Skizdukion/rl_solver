@@ -27,21 +27,21 @@ from utils.ppo import (
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-def create_agent(env: gym.vector.VectorEnv):
-    actor_output = env.single_action_space.n
+def create_agent(env: gym.Env):
+    actor_output = env.action_space.n
     actor = BackboneNetwork(
         in_channels=3,
         hidden_channels=64,
         out_features=actor_output,
         dropout_prob=0.1,
-        board_size=env.single_observation_space["board"].shape[0],
+        board_size=env.observation_space["board"].shape[0],
     )
     critic = BackboneNetwork(
         in_channels=3,
         hidden_channels=64,
         out_features=1,
         dropout_prob=0.1,
-        board_size=env.single_observation_space["board"].shape[0],
+        board_size=env.observation_space["board"].shape[0],
     )
 
     agent = ActorCritic(actor, critic)
@@ -68,7 +68,7 @@ def get_vectorized_actions(masks):
     return actions
 
 
-def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
+def forward_pass(env, agent, num_rollout_steps, discount_factor, temperature):
     states = []
     actions = []
     actions_log_probability = []
@@ -78,39 +78,43 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
     terminations = []
     truncations = []
 
-    observation, info = envs.reset()
-    state = from_boards_to_state(observation["board"])
+    observation, info = env.reset()
+    state = from_boards_to_state(np.expand_dims(observation["board"], axis=0))
     agent.train()
 
     for i in range(num_rollout_steps):
         state = torch.tensor(
             state, dtype=torch.float32, device=device
-        )  # Batch, 3, board_size, board_size
+        )  # 1, 3, board_size, board_size
 
         states.append(state)
         action_pred, value_pred = agent(state)
 
         # 2. Mask the logits
-        mask = torch.tensor(info["action_mask"], device=device)
+        mask = torch.tensor(np.expand_dims(info["action_mask"], axis=0), device=device)
         masked_action_pred = (action_pred / temperature) + (1 - mask) * -1e9
 
         dist = distributions.Categorical(logits=masked_action_pred)
         action = dist.sample()
         log_prob_action = dist.log_prob(action)
 
-        observation, reward, terminated, truncated, info = envs.step(
-            action.cpu().numpy()
-        )
+        observation, reward, terminated, _, info = env.step((action.cpu().numpy())[0])
+
+        if terminated:
+            print("STOP, and start new squencing")
 
         actions.append(action)
         actions_log_probability.append(log_prob_action)
         values.append(value_pred.squeeze(-1))
-        rewards.append(torch.tensor(reward, dtype=torch.float32, device=device))
+        rewards.append(
+            torch.tensor(reward, dtype=torch.float32, device=device).unsqueeze(0)
+        )
 
-        terminations.append(torch.tensor(terminated, dtype=torch.bool, device=device))
-        truncations.append(torch.tensor(truncated, dtype=torch.bool, device=device))
+        terminations.append(
+            torch.tensor(terminated, dtype=torch.bool, device=device).unsqueeze(0)
+        )
 
-        state = from_boards_to_state(observation["board"])
+        state = from_boards_to_state(np.expand_dims(observation["board"], axis=0))
 
     with torch.no_grad():
         # Get the value of the 'next_state' to estimate future rewards
@@ -118,16 +122,12 @@ def forward_pass(envs, agent, num_rollout_steps, discount_factor, temperature):
         _, last_value = agent(last_state_tensor)
         last_value = last_value.squeeze(-1)  # (num_envs,)
 
-    states = torch.stack(states)  # (Timestep, num_envs, 3, board_size, board_size)
-    actions = torch.stack(actions)  # (Timestep, num_envs )
-    actions_log_probability = torch.stack(
-        actions_log_probability
-    )  # (Timestep, num_envs )
+    states = torch.stack(states) # (Timestep, num_envs, 3, board_size, board_size)
+    actions = torch.stack(actions) # (Timestep, num_envs )
+    actions_log_probability = torch.stack(actions_log_probability)  # (Timestep, num_envs )
     values_tensor = torch.stack(values)  # (Timestep, num_envs )
     term_tensor = torch.stack(terminations)  # (Timestep, num_envs )
-    # trunc_tensor = torch.stack(truncations)
-    rewards_tensor = torch.stack(rewards)  # (Timestep, num_envs )
-    # dones_tensor = torch.stack(dones)
+    rewards_tensor = torch.stack(rewards) # (Timestep, num_envs )
 
     advantages, returns = calculate_adversarial_gae(
         rewards_tensor,
@@ -214,20 +214,8 @@ def update_policy(
     return total_policy_loss / ppo_steps, total_value_loss / ppo_steps
 
 
-def make_env():
-    env = gym.make(
-        "caro_env/Gomoku-v0",
-        size=5,
-        win_size=3,
-    )
-    # env = SelfPlayOpponentWrapper(env)
-    # env = gym.wrappers.Autoreset(env)
-    env = CustomResetWrapper(env)
-    return env
-
-
 def run_ppo():
-    MAX_EPISODES = 20000
+    # MAX_EPISODES = 20000
     DISCOUNT_FACTOR = 1
     PRINT_INTERVAL = 10
     PPO_STEPS = 8
@@ -237,26 +225,30 @@ def run_ppo():
     LEARNING_RATE = 1e-4
     SAVE_INTERVAL = 50
     TEMPERATURE = 1.2
-    # ADD_OPP_INTERVAL = 150
 
     train_rewards = []
     policy_losses = []
     value_losses = []
 
-    envs = gym.vector.SyncVectorEnv([make_env for _ in range(4)])
+    # Small board for debuging
+    env = gym.make(
+        "caro_env/Gomoku-v0",
+        size=5,
+        win_size=3,
+        render_mode="human",
+    )
+    env = CustomResetWrapper(env)
 
-    agent = create_agent(envs)
-    start_episode = load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
+    agent = create_agent(env)
     agent.to(device)
 
     optimizer = optim.Adam(agent.parameters(), lr=LEARNING_RATE)
-    load_optimizer_state(optimizer, "checkpoints_gomuko/ppo_latest.pt", device)
 
-    MAX_TIME_STEPS = 512
+    MAX_TIME_STEPS = 20
 
-    for episode in trange(start_episode, MAX_EPISODES + 1):
+    for episode in trange(1, 10):
         states, actions, actions_log_probability, advantages, returns, rewards = (
-            forward_pass(envs, agent, MAX_TIME_STEPS, DISCOUNT_FACTOR, TEMPERATURE)
+            forward_pass(env, agent, MAX_TIME_STEPS, DISCOUNT_FACTOR, TEMPERATURE)
         )
 
         policy_loss, value_loss = update_policy(

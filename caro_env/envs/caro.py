@@ -13,7 +13,7 @@ class Player(Enum):
 class GomokuEnv(gym.Env):
     metadata = {"render_modes": ["human", "rgb_array"], "render_fps": 4}
 
-    def __init__(self, render_mode=None, size=16):
+    def __init__(self, render_mode=None, size=16, win_size=5):
         self.size = size  # The size of the square grid
         self.window_size = 512  # The size of the PyGame window
 
@@ -25,6 +25,7 @@ class GomokuEnv(gym.Env):
         )
 
         self.action_space = spaces.Discrete(size * size)
+        self.win_con = win_size
 
         assert render_mode is None or render_mode in self.metadata["render_modes"]
         self.render_mode = render_mode
@@ -61,6 +62,7 @@ class GomokuEnv(gym.Env):
         }
 
     def reset(self, seed=None, options=None):
+        print('Caro env reset')
         # We need the following line to seed self.np_random
         super().reset(seed=seed)
 
@@ -85,6 +87,7 @@ class GomokuEnv(gym.Env):
         return self._get_obs(), info
 
     def step(self, action):
+        print('Caro env step')
         assert isinstance(action, (int, np.integer)), "action must be an integer"
 
         x = action // self.size
@@ -115,7 +118,7 @@ class GomokuEnv(gym.Env):
             point_1 = self._check_point_in_dir(direction[0])
             point_2 = self._check_point_in_dir(direction[1])
 
-            if point_1 + point_2 - 1 >= 5:
+            if point_1 + point_2 - 1 >= self.win_con:
                 return True
 
         return False
