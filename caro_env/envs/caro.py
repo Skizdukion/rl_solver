@@ -74,8 +74,10 @@ class GomokuEnv(gym.Env):
             opp_starts = options.get("opp_starts", False)
 
         if opp_starts:
+            # print("OP starts -------------")
             self._last_player = Player.Agent.value
         else:
+            # print("Agent starts -------------")
             self._last_player = Player.Opp.value
 
         info = self._get_info()
@@ -92,6 +94,11 @@ class GomokuEnv(gym.Env):
         y = action % self.size
 
         cur_player = self._last_player * -1
+
+        # print("CURRENT BOARD -----")
+        # print(self._get_obs()["board"])
+        # print(f"Player {cur_player} make move: ")
+        # print(f"X: {x}, Y: {y}")
 
         if self.board[x][y] != 0:
             raise Exception("Invalid move")

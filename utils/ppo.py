@@ -38,6 +38,44 @@ def calculate_advantages(returns, values):
     return advantages
 
 
+def calculate_gae(
+    rewards,
+    values,
+    dones,
+    next_value,
+    gamma=0.99,
+    gae_lambda=0.95,
+):
+    """
+    rewards: (T, N) torch tensor (device = cuda or cpu)
+    values:  (T, N)
+    dones:   (T, N)
+    next_value: (N,)
+    """
+    T, N = rewards.shape
+    device = rewards.device
+
+    advantages = torch.zeros((T, N), device=device)
+    last_adv = torch.zeros(N, device=device)
+
+    for t in reversed(range(T)):
+        if t == T - 1:
+            next_val = next_value
+        else:
+            next_val = values[t + 1]
+
+        delta = rewards[t] + gamma * next_val * (1 - dones[t]) - values[t]
+        last_adv = delta + gamma * gae_lambda * (1 - dones[t]) * last_adv
+        advantages[t] = last_adv
+
+    returns = advantages + values
+
+    # PPO normalization
+    advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+
+    return advantages, returns
+
+
 def calculate_surrogate_loss(
     actions_log_prob_old, actions_log_prob_new, espilon, advantages
 ):  # Full sequence of action -> [B, T]
@@ -71,7 +109,7 @@ def calculate_total_rewards_with_discount_factor(rewards, discount_factor):
 
 
 def save_checkpoint(episode, agent, optimizer, train_rewards, path):
-    path = CHECKPOINT_PATH + path
+    # path = CHECKPOINT_PATH + path
 
     if not os.path.exists(path):
         os.makedirs(path)
@@ -88,7 +126,7 @@ def save_checkpoint(episode, agent, optimizer, train_rewards, path):
 
 
 def load_agent_weights(agent, path):
-    path = CHECKPOINT_PATH + path
+    # path = CHECKPOINT_PATH + path
 
     print("Load agent weights")
     print(path)
@@ -104,7 +142,7 @@ def load_agent_weights(agent, path):
 
 
 def load_optimizer_state(optimizer, path, device):
-    path = CHECKPOINT_PATH + path
+    # path = CHECKPOINT_PATH + path
 
     print("Load optimizer state")
     print(path)

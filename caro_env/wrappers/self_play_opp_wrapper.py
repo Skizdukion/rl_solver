@@ -32,7 +32,7 @@ class SelfPlayOpponentWrapper(gym.Wrapper):
     def _get_opp_action(self, obs, info):
         # Convert single numpy obs to tensor [1, C, H, W]
         # Invert board logic: My stones (-1) -> 1, Enemy stones (1) -> -1
-        board = np.expand_dims(obs["board"] * -1, axis=0)
+        board = np.expand_dims(obs["board"], axis=0)
         state = from_boards_to_state(board)
         state_tensor = torch.tensor(
             state, dtype=torch.float32, device=SelfPlayOpponentWrapper.DEVICE
