@@ -230,20 +230,21 @@ def run_ppo():
     MAX_EPISODES = 20000
     DISCOUNT_FACTOR = 1
     PRINT_INTERVAL = 10
-    PPO_STEPS = 8
+    PPO_STEPS = 16
     N_TRIALS = 100
     EPSILON = 0.2
     ENTROPY_COEFFICIENT = 0.01
     LEARNING_RATE = 1e-4
     SAVE_INTERVAL = 50
     TEMPERATURE = 1.2
+    NUM_ENVS = 64
     # ADD_OPP_INTERVAL = 150
 
     train_rewards = []
     policy_losses = []
     value_losses = []
 
-    envs = gym.vector.SyncVectorEnv([make_env for _ in range(4)])
+    envs = gym.vector.SyncVectorEnv([make_env for _ in range(NUM_ENVS)])
 
     agent = create_agent(envs)
     start_episode = load_agent_weights(agent, "checkpoints_gomuko/ppo_latest.pt")
