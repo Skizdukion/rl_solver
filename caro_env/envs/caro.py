@@ -62,7 +62,6 @@ class GomokuEnv(gym.Env):
         }
 
     def reset(self, seed=None, options=None):
-        print('Caro env reset')
         # We need the following line to seed self.np_random
         super().reset(seed=seed)
 
@@ -87,7 +86,6 @@ class GomokuEnv(gym.Env):
         return self._get_obs(), info
 
     def step(self, action):
-        print('Caro env step')
         assert isinstance(action, (int, np.integer)), "action must be an integer"
 
         x = action // self.size
